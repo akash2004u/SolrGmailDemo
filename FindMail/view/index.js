@@ -45,7 +45,7 @@ mailSearch.controller('indexCtrl',['$scope','indexService'
   }]);
 
 mailSearch.service('indexService',['$http',function($http){
-	var BASE_URL = 'http://localhost:8983/solr/collection1/select?wt=json';
+	var BASE_URL = 'http://localhost:8983/solr/heapwalk/select?wt=json';
 	
 	this.getEmails = function(key) {
 		console.log('Search Key :'+key);

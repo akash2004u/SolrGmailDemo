@@ -42,15 +42,15 @@
 						<a href="#" class="list-group-item" ng-repeat="email in emails" style="margin-top:5px;" ng-animate="{enter: 'animate-enter', leave: 'animate-leave'}" onclick="Javascript:toggleContent(this);">
 							 <span class="glyphicon glyphicon-star-empty"></span>
 							 <span class="name" style="min-width: 120px; display: inline-block;">
-							 {{email.author}}</span> 
-							 <span class="">{{email.subject}}</span> 
-							 <span class="badge">12:10 AM</span>
+							 {{email.from[0]}}</span> 
+							 <span class="">{{email.subject[0]}}</span> 
+							 <span class="badge">{{email.sentOn}}</span>
 							 <span class="pull-right">
-							 	<span class="glyphicon glyphicon-paperclip"> </span>
+							 	<span class="glyphicon glyphicon-paperclip" ng-show="{{email.attachments.length > 0}}"> </span>
 							 </span>
 							 <span class="hidden toggle">
 							 		<hr/>
-								<span class="">{{email.content}}</span>	
+								<span class="">{{email.body}}</span>	
 								<br />
 								<span class="pull-right">
 									<input type="button" value="Download" class="btn-success" onclick="Javascript:function(e){e.preventDefault(); return false;};"></input>

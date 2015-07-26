@@ -8,9 +8,12 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Date;
 import java.util.List;
 import java.util.Properties;
 
+import javax.activation.DataHandler;
 import javax.mail.Address;
 import javax.mail.BodyPart;
 import javax.mail.MessagingException;
@@ -40,7 +43,7 @@ import com.google.api.services.gmail.model.Message;
 
 public class MailBridge {
 
-	private static final String SolrServerAddress = "";
+	private static final String SolrServerAddress = "http://localhost:8983/solr/heapwalk";
 	private static final String APPLICATION_NAME = "GmailSearch";
 	private static final java.io.File DATA_STORE_DIR = new java.io.File(
 			System.getProperty("user.home"),
@@ -87,67 +90,103 @@ public class MailBridge {
 	}
 
 	public static void main(String[] args) throws IOException,
-			MessagingException {
+			MessagingException, SolrServerException {
 		// Build a new authorized API client service.
 		Gmail service = getGmailService();
 		String user = "me";
-
 		ListMessagesResponse messages = service.users().messages().list(user)
 				.execute();
-		if (messages.size() == 0) {
-			System.out.println("No Emails found.");
-		} else {
-			System.out.println("Labels:");
-			for (Message label : messages.getMessages()) {
-				Message message = service.users().messages()
-						.get(user, label.getId()).setFormat("raw").execute();
-				byte[] emailBytes = message.decodeRaw();
+		
+		for(int i = 0; i < 6;i++)
+	     messages = service.users().messages().list(user).setPageToken(messages.getNextPageToken()).execute();
+	     
+	    int cnt = 4;
+		 while (messages.getMessages() != null) { 
+			 System.out.println("Loading Page  *************************************************"+(cnt++));
+				if (messages.size() == 0) {
+					System.out.println("No Emails found.");
+				} else {
+					System.out.println("Labels:");
+					
+					for (Message label : messages.getMessages()) {
+						Message message = service.users().messages()
+								.get(user, label.getId()).setFormat("raw").execute();
+						byte[] emailBytes = message.decodeRaw();
 
-				Properties props = new Properties();
-				Session session = Session.getDefaultInstance(props, null);
+						Properties props = new Properties();
+						Session session = Session.getDefaultInstance(props, null);
 
-				MimeMessage email = new MimeMessage(session,
-						new ByteArrayInputStream(emailBytes));
-				indexEmail(label.getId(), email);
-			}
-		}
+						MimeMessage email = new MimeMessage(session,new ByteArrayInputStream(emailBytes));
+						indexEmail(label.getId(), email);
+					}
+				}
+			 
+		      if (messages.getNextPageToken() != null) {
+		        String pageToken = messages.getNextPageToken();
+		        messages = service.users().messages().list(user)
+		            .setPageToken(pageToken).execute();
+		      } else {
+		        break;
+		      }
+		    }
+
+	   	
 	}
 
 	public static void addToIndex(String id, String subject,
-			String sentTo, String author, String body, String[] attachments)
-			throws SolrServerException, IOException {
+			List<String> sentTo, String author, String body,
+			List<String> attachments,Date sentOn) throws SolrServerException, IOException {
+
+
+		System.out.println("New Message");
+		System.out.println("Addging Doc");
+		System.out.println("Id :"+id);
+		System.out.println("To :"+sentTo);
+		System.out.println("author :"+author);
+		System.out.println("body :"+body);
+		System.out.println("attachments :"+attachments);
+		System.out.println("(*****");
+				
 		HttpSolrServer server = new HttpSolrServer(SolrServerAddress);
 		SolrInputDocument doc = new SolrInputDocument();
 
+		
 		doc.addField("id", id);
 		doc.addField("subject", subject);
-		doc.addField("to", sentTo);
+
+		for (String toVal : sentTo) {
+			doc.addField("to", toVal);
+		}
+
 		doc.addField("from", author);
 		doc.addField("body", body.replaceAll("(\\r)", ""));
 		for (String attachment : attachments) {
-			doc.addField("links", attachment);
+			doc.addField("attachment", attachment);
 		}
+		doc.addField("sentOn", sentOn);
 
 		server.add(doc);
 		server.commit();
 	}
 
 	public static void indexEmail(String id, MimeMessage email)
-			throws MessagingException, IOException {
+			throws MessagingException, IOException, SolrServerException {
 
 		String subject = email.getSubject();
 		List<String> toList = new ArrayList<String>();
 		for (Address add : email.getAllRecipients()) {
 			toList.add(add.toString());
 		}
-		
-		System.out.println(email.getSentDate());
+		String author = email.getFrom() == null ? "" : email.getFrom()[0]
+				.toString();
+		Date date = email.getSentDate();
 
 		MimeMessage message = email;
 		String result = "";
-		if (message instanceof MimeMessage) {
-			MimeMessage m = (MimeMessage) message;
-			Object contentObject = m.getContent();
+		List<String> attachments = new ArrayList<String>();
+		
+		if (message instanceof MimeMessage) { 
+			Object contentObject = email.getContent();
 			if (contentObject instanceof Multipart) {
 				BodyPart clearTextPart = null;
 				BodyPart htmlTextPart = null;
@@ -155,7 +194,15 @@ public class MailBridge {
 				int count = contentPart.getCount();
 				for (int i = 0; i < count; i++) {
 					BodyPart part = contentPart.getBodyPart(i);
-					if (part.isMimeType("text/plain")) {
+
+					String disposition = part.getDisposition();
+					
+					if (disposition != null && (disposition.equalsIgnoreCase("ATTACHMENT"))) {
+							System.out.println("Mail have some attachment");
+							DataHandler handler = part.getDataHandler();
+							System.out.println("file name : " + handler.getName()); 
+							attachments.add(handler.getName());
+					} else if (part.isMimeType("text/plain")) {
 						clearTextPart = part;
 						break;
 					} else if (part.isMimeType("text/html")) {
@@ -170,43 +217,37 @@ public class MailBridge {
 					result = Jsoup.parse(html).text();
 				}
 
-			} else if (contentObject instanceof String) // a simple text message
-			{
+			} else if (contentObject instanceof String) {
 				result = (String) contentObject;
-			} else // not a mime message
-			{
-				System.out.println("Not a Valid Message");
+			} else {
+				result = "";
 			}
 
-			/*
-			 * 
-			 * 
-			 * Object msgContent = messages[i].getContent();
-			 * 
-			 * String content = "";
-			 * 
-			 * if (msgContent instanceof Multipart) {
-			 * 
-			 * Multipart multipart = (Multipart) msgContent;
-			 * 
-			 * Log.e("BodyPart", "MultiPartCount: "+multipart.getCount());
-			 * 
-			 * for (int j = 0; j < multipart.getCount(); j++) {
-			 * 
-			 * BodyPart bodyPart = multipart.getBodyPart(j);
-			 * 
-			 * String disposition = bodyPart.getDisposition();
-			 * 
-			 * if (disposition != null &&
-			 * (disposition.equalsIgnoreCase("ATTACHMENT"))) {
-			 * System.out.println("Mail have some attachment");
-			 * 
-			 * DataHandler handler = bodyPart.getDataHandler();
-			 * System.out.println("file name : " + handler.getName()); } else {
-			 * content = getText(bodyPart); // the changed code } } } else
-			 * content= messages[i].getContent().toString();
-			 */
 		}
+		
+
+		addToIndex(id,subject,toList, author, result,attachments,date);
+
+		/*
+		 * 
+		 * 
+		 * Object msgContent = messages[i].getContent();
+		 * 
+		 * String content = "";
+		 * 
+		 * if (msgContent instanceof Multipart) {
+		 * 
+		 * Multipart multipart = (Multipart) msgContent;
+		 * 
+		 * Log.e("BodyPart", "MultiPartCount: "+multipart.getCount());
+		 * 
+		 * for (int j = 0; j < multipart.getCount(); j++) {
+		 * 
+		 * BodyPart bodyPart = multipart.getBodyPart(j);
+		 * 
+		 * 
+		 * 
+		 */
 
 		System.out.println("Resul :" + result);
 
