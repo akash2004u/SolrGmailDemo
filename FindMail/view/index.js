@@ -27,11 +27,15 @@ mailSearch.controller('indexCtrl',['$scope','indexService'
 
    	 	$scope.footerMessage = '';
     	indexService.getEmails(key)
-	     .success(function(data) {	
-	    	 $scope.footerMessage = 'Query Returned '+data;
-	    	 console.log(data);
-	          $scope.emails = data.response.docs;
-	          console.log($scope.emails);
+	     .success(function(data) {	 
+	    	 try {
+	    	 $scope.footerMessage = 'Query Returned '+data.response.numFound+ ' in '
+	    	 		+ (data.responseHeader.QTime == 0 ? '< 1' : data.responseHeadaer.QTime )+ ' ms';
+	    	 } catch(error){
+	    		 $scope.footerMessage = 'Error Loading metadata'; 
+	    	 }
+	    	 
+	    	 $scope.emails = data.response.docs;
 	     })
 	     .error(function() {
 	        console.log('There was an error Searching');
@@ -79,13 +83,30 @@ mailSearch.service('indexService',['$http',function($http){
 			params : {
 				'json.wrf' : 'JSON_CALLBACK',
 				'q' : query.trim().length < 1 ? '*' : query,
-				'fq': filterQuery
+				'fq': filterQuery,
+				'rows' : 100
 			}
 		});
 	};
 	
 	
 }]);
+
+
+mailSearch.filter('trimEmail',function() {
+	return function(input){
+		var idx = input.indexOf('<');
+		if(idx > 1) 
+			return input.substring(0,idx-1);
+	}
+});
+mailSearch.filter('maxLen',function() {
+	return function(input,len){
+		console.log('Max Len '+len);
+		var idx = (len >= input.length) ? input.length : len;
+		return input.substring(0,idx) + ((idx == len) ? "..." : "");
+	}
+});
 
 mailSearch.directive('ngEnter', function () {
     return function (scope, element, attrs) {
